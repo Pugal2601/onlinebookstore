@@ -3,6 +3,8 @@ pipeline {
     agent any
 
     environment {
+        PATH = "/opt/maven/bin:${env.PATH}"
+
         REPO_URL = 'https://github.com/Pugal2601/onlinebookstore.git'
         BRANCH = 'master'
 
@@ -26,32 +28,24 @@ pipeline {
             }
         }
 
-        stage('Verify Tools') {
+        stage('Verify Environment') {
             steps {
                 sh '''
-                    echo "Checking Java version"
                     java -version
-
-                    echo "Checking Maven version"
                     mvn -version
-
-                    echo "Checking Docker version"
+                    git --version
                     docker --version
-
-                    echo "Checking Docker daemon"
                     docker info
                 '''
             }
         }
 
-        stage('Build Application') {
+        stage('Build Java Application') {
             steps {
-                echo 'Building Java WAR application'
+                echo 'Building WAR using Maven'
 
                 sh '''
                     mvn -B clean package
-
-                    echo "Checking generated WAR file"
 
                     test -f target/onlinebookstore.war
 
@@ -62,7 +56,7 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo 'Building Docker image'
+                echo 'Creating Online Bookstore Docker image'
 
                 sh '''
                     docker build \
@@ -72,36 +66,36 @@ pipeline {
             }
         }
 
-        stage('Deploy Container') {
+        stage('Deploy Application') {
             steps {
-                echo 'Deploying Online Bookstore container'
+                echo 'Deploying application container'
 
                 sh '''
-                    # Remove previous container if present
                     docker rm -f ${CONTAINER_NAME} || true
 
-                    # Start new container
                     docker run -d \
                         --name ${CONTAINER_NAME} \
                         --restart unless-stopped \
                         -p ${HOST_PORT}:${CONTAINER_PORT} \
                         ${APP_NAME}:${IMAGE_TAG}
-
-                    echo "Container deployment completed"
                 '''
             }
         }
 
-        stage('Verify Deployment') {
+        stage('Verify Container') {
             steps {
                 sh '''
-                    echo "Checking container status"
+                    sleep 15
+
+                    if [ "$(docker inspect -f '{{.State.Running}}' ${CONTAINER_NAME})" != "true" ]; then
+                        echo "Container is not running"
+                        docker logs ${CONTAINER_NAME}
+                        exit 1
+                    fi
+
+                    echo "Container is running successfully"
 
                     docker ps --filter "name=${CONTAINER_NAME}"
-
-                    echo "Checking application logs"
-
-                    sleep 10
 
                     docker logs --tail 30 ${CONTAINER_NAME}
                 '''
@@ -112,19 +106,16 @@ pipeline {
     post {
         success {
             echo """
-            BUILD SUCCESSFUL!
+            Online Bookstore deployment successful!
 
-            Application: Online Bookstore
-            Container: onlinebookstore
-            Image: ${APP_NAME}:${IMAGE_TAG}
-
-            Access URL:
-            http://YOUR_JENKINS_HOST_IP:${HOST_PORT}/onlinebookstore/
+            Docker Image: ${APP_NAME}:${IMAGE_TAG}
+            Container: ${CONTAINER_NAME}
+            Application Port: ${HOST_PORT}
             """
         }
 
         failure {
-            echo 'BUILD FAILED! Check Jenkins Console Output.'
+            echo 'Pipeline failed. Check Console Output.'
         }
     }
 }
