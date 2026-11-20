@@ -1,0 +1,22 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: onlinebookstore
+  namespace: bookstore
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: onlinebookstore
+  template:
+    metadata:
+      labels:
+        app: onlinebookstore
+    spec:
+      containers:
+        - name: onlinebookstore
+          image: pugal123/onlinebookstore:initial
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
