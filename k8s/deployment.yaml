@@ -4,19 +4,37 @@ kind: Deployment
 metadata:
   name: onlinebookstore
   namespace: bookstore
+
 spec:
   replicas: 2
+
   selector:
     matchLabels:
       app: onlinebookstore
+
   template:
     metadata:
       labels:
         app: onlinebookstore
+
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+
       containers:
         - name: onlinebookstore
           image: pugal123/onlinebookstore:initial
           imagePullPolicy: Always
+
           ports:
             - containerPort: 8080
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
