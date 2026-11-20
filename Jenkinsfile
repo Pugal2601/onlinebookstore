@@ -42,6 +42,18 @@ pipeline {
             }
         }
 
+        stage('Trivy Filesystem Scan') {
+            steps {
+                sh '''
+                    trivy fs \
+                    --scanners vuln,misconfig,secret \
+                    --severity HIGH,CRITICAL \
+                    --exit-code 1 \
+                    .
+              '''
+            }
+        }
+
         stage('Build Docker Image') {
             steps {
                 sh '''
