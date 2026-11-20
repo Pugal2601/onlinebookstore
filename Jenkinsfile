@@ -8,12 +8,7 @@ pipeline {
         REPO_URL = 'https://github.com/Pugal2601/onlinebookstore.git'
         BRANCH = 'master'
 
-        APP_NAME = 'onlinebookstore'
-        CONTAINER_NAME = 'onlinebookstore'
-
-        HOST_PORT = '8081'
-        CONTAINER_PORT = '8080'
-
+        IMAGE_NAME = 'pugal123/onlinebookstore'
         IMAGE_TAG = "${BUILD_NUMBER}"
     }
 
@@ -21,8 +16,6 @@ pipeline {
 
         stage('Checkout') {
             steps {
-                echo 'Cloning Online Bookstore repository'
-
                 git branch: "${BRANCH}",
                     url: "${REPO_URL}"
             }
@@ -33,22 +26,17 @@ pipeline {
                 sh '''
                     java -version
                     mvn -version
-                    git --version
                     docker --version
-                    docker info
+                    kubectl version --client
                 '''
             }
         }
 
         stage('Build Java Application') {
             steps {
-                echo 'Building WAR using Maven'
-
                 sh '''
                     mvn -B clean package
-
                     test -f target/onlinebookstore.war
-
                     ls -lh target/onlinebookstore.war
                 '''
             }
@@ -56,49 +44,85 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
-                echo 'Creating Online Bookstore Docker image'
-
                 sh '''
                     docker build \
-                        -t ${APP_NAME}:${IMAGE_TAG} \
-                        -t ${APP_NAME}:latest .
+                      -t ${IMAGE_NAME}:${IMAGE_TAG} .
                 '''
             }
         }
 
-        stage('Deploy Application') {
+        stage('Push Image to Docker Hub') {
             steps {
-                echo 'Deploying application container'
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKERHUB_USER',
+                        passwordVariable: 'DOCKERHUB_TOKEN'
+                    )
+                ]) {
+                    sh '''
+                        echo "$DOCKERHUB_TOKEN" | docker login \
+                          -u "$DOCKERHUB_USER" --password-stdin
 
-                sh '''
-                    docker rm -f ${CONTAINER_NAME} || true
+                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
 
-                    docker run -d \
-                        --name ${CONTAINER_NAME} \
-                        --restart unless-stopped \
-                        -p ${HOST_PORT}:${CONTAINER_PORT} \
-                        ${APP_NAME}:${IMAGE_TAG}
-                '''
+                        docker logout
+                    '''
+                }
             }
         }
 
-        stage('Verify Container') {
+        stage('Deploy to Kubernetes') {
             steps {
-                sh '''
-                    sleep 15
+                withCredentials([
+                    file(
+                        credentialsId: 'bookstore-kubeconfig',
+                        variable: 'KUBECONFIG'
+                    )
+                ]) {
+                    sh '''
+                        echo "Applying Kubernetes Service"
 
-                    if [ "$(docker inspect -f '{{.State.Running}}' ${CONTAINER_NAME})" != "true" ]; then
-                        echo "Container is not running"
-                        docker logs ${CONTAINER_NAME}
-                        exit 1
-                    fi
+                        kubectl apply -f k8s/service.yaml
 
-                    echo "Container is running successfully"
+                        echo "Updating Deployment image"
 
-                    docker ps --filter "name=${CONTAINER_NAME}"
+                        sed "s|pugal123/onlinebookstore:initial|${IMAGE_NAME}:${IMAGE_TAG}|g" \
+                          k8s/deployment.yaml > deployment-build.yaml
 
-                    docker logs --tail 30 ${CONTAINER_NAME}
-                '''
+                        kubectl apply -f deployment-build.yaml
+
+                        echo "Waiting for Kubernetes rollout"
+
+                        kubectl rollout status deployment/onlinebookstore \
+                          -n bookstore --timeout=180s
+                    '''
+                }
+            }
+        }
+
+        stage('Verify Kubernetes Deployment') {
+            steps {
+                withCredentials([
+                    file(
+                        credentialsId: 'bookstore-kubeconfig',
+                        variable: 'KUBECONFIG'
+                    )
+                ]) {
+                    sh '''
+                        echo "Checking Pods"
+
+                        kubectl get pods -n bookstore -o wide
+
+                        echo "Checking Deployment"
+
+                        kubectl get deployments -n bookstore
+
+                        echo "Checking Service"
+
+                        kubectl get services -n bookstore
+                    '''
+                }
             }
         }
     }
@@ -106,16 +130,17 @@ pipeline {
     post {
         success {
             echo """
-            Online Bookstore deployment successful!
+            Online Bookstore deployed successfully!
 
-            Docker Image: ${APP_NAME}:${IMAGE_TAG}
-            Container: ${CONTAINER_NAME}
-            Application Port: ${HOST_PORT}
+            Image: ${IMAGE_NAME}:${IMAGE_TAG}
+            Namespace: bookstore
+            Replicas: 2
+            NodePort: 30080
             """
         }
 
         failure {
-            echo 'Pipeline failed. Check Console Output.'
+            echo 'Pipeline failed. Check Jenkins Console Output.'
         }
     }
 }
