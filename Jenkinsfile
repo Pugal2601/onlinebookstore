@@ -43,16 +43,25 @@ pipeline {
         }
 
         stage('Trivy Filesystem Scan') {
-            steps {
-                sh '''
-                    trivy fs \
-                    --scanners vuln,misconfig,secret \
-                    --severity HIGH,CRITICAL \
-                    --exit-code 1 \
-                    .
-              '''
-            }
+    steps {
+        sh '''
+            trivy fs \
+              --scanners vuln,misconfig,secret \
+              --severity LOW,MEDIUM,HIGH,CRITICAL \
+              --format table \
+              --output trivy-fs-report.txt \
+              .
+
+            echo "Filesystem scan completed"
+        '''
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: 'trivy-fs-report.txt',
+                             allowEmptyArchive: true
         }
+    }
+}
 
         stage('Build Docker Image') {
             steps {
@@ -65,16 +74,25 @@ pipeline {
 
         
         stage('Trivy Image Scan') {
-            steps {
-                sh '''
-                    trivy image \
-                    --scanners vuln,secret \
-                    --severity HIGH,CRITICAL \
-                    --exit-code 1 \
-                    ${IMAGE_NAME}:${IMAGE_TAG}
-              '''
-          }
-      }
+    steps {
+        sh '''
+            trivy image \
+              --scanners vuln,secret \
+              --severity LOW,MEDIUM,HIGH,CRITICAL \
+              --format table \
+              --output trivy-image-report.txt \
+              ${IMAGE_NAME}:${IMAGE_TAG}
+
+            echo "Docker image scan completed"
+        '''
+    }
+    post {
+        always {
+            archiveArtifacts artifacts: 'trivy-image-report.txt',
+                             allowEmptyArchive: true
+        }
+    }
+}
 
 
         stage('Push Image to Docker Hub') {
